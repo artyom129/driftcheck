@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --release
+      - name: Check a generated migration end to end
+        shell: bash
+        run: |
+          cargo run --release -- gen --rows 5000 --out gen
+          set +e
+          cargo run --release -- check --source gen/legacy.csv --target gen/migrated.csv --contract gen/mapping.json --json gen/report.json --csv gen/findings.csv
+          code=$?
+          set -e
+          test "$code" -eq 1
+          test -s gen/report.json
+          test -s gen/findings.csv

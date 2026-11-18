@@ -1,0 +1,23 @@
+[package]
+name = "driftcheck"
+version = "0.1.0"
+edition = "2021"
+description = "Fast record-by-record reconciliation of two data exports, with a verdict, a diff report and a CI exit code"
+license = "MIT"
+authors = ["Koncha Artyom"]
+repository = "https://github.com/artyom129/driftcheck"
+readme = "README.md"
+keywords = ["reconciliation", "data-migration", "csv", "data-quality", "cli"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+csv = "1.3"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
