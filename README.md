@@ -6,16 +6,28 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
+[![CI](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.2.0-2F6FEB)
 ![Tests](https://img.shields.io/badge/tests-40%20passed-2E8B57)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+<img src="docs/check.svg" width="820" alt="driftcheck check on 120,000 rows: 107,000 matched, 4,000 renamed, 6,500 changed, 2,800 missing, 1,200 extra, rejected">
+
+| **159×** | **2.5 s** | **1.7 s** | **40** |
+|:---:|:---:|:---:|:---:|
+| faster than SyncProof<br>on 120,000 rows | to reconcile<br>120,000 rows | to draft a contract<br>from the data | tests, CI on<br>Linux and Windows |
+
+[What it does](#what-it-does) · [What's new](#whats-new-in-02) · [Speed](#speed) · [Quick start](#quick-start) · [Contract](#the-mapping-contract) · [CI](#in-a-pipeline) · [Versions](#versions)
 
 </div>
 
 ## What it does
 
 You moved customers, orders or vendors from one system to another. Both sides have 120,000 rows. driftcheck tells you whether they are the same 120,000 records with the same values, and lists every one that is not.
+
+<details>
+<summary>The same output as text</summary>
 
 ```text
 $ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json --csv findings.csv
@@ -41,6 +53,8 @@ quality 91.4  rejected
   - 1200 target-only records exceeds allowed maximum 0
   - quality score 91.4 is below required 99.0
 ```
+
+</details>
 
 | Outcome | Meaning |
 |---|---|
@@ -73,6 +87,9 @@ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.js
   --patch fix.sql --table crm.customers --markdown summary.md
 ```
 
+<details>
+<summary>What <code>driftcheck init</code> prints</summary>
+
 ```text
 driftcheck init  legacy.csv -> migrated.csv
 
@@ -86,6 +103,11 @@ driftcheck init  legacy.csv -> migrated.csv
   renamed records are searched by: full_name, email
 ```
 
+</details>
+
+<details>
+<summary>What the patch plan looks like</summary>
+
 ```sql
 BEGIN;
 UPDATE "crm"."customers" SET "tier" = 'Business' WHERE "id" = 'C-100005';
@@ -96,6 +118,11 @@ INSERT INTO "crm"."customers" ("id", "name", "email_address", "tier", "monthly_r
 COMMIT;
 -- 6500 updates, 2500 inserts, 1200 deletes to review, 300 skipped
 ```
+
+</details>
+
+> [!IMPORTANT]
+> `DELETE` statements are written commented out. A row that exists only in the new system may be new data entered after the migration, so removing it is a decision for a person.
 
 ## Speed
 

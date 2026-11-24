@@ -6,16 +6,28 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
+[![CI](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.2.0-2F6FEB)
 ![Tests](https://img.shields.io/badge/tests-40%20passed-2E8B57)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+<img src="docs/check.svg" width="820" alt="120 000 жолдағы driftcheck check: 107 000 сәйкес, 4 000 атауы өзгерген, 6 500 өзгерген, 2 800 жоғалған, 1 200 артық, қабылданбады">
+
+| **159×** | **2,5 с** | **1,7 с** | **40** |
+|:---:|:---:|:---:|:---:|
+| 120 000 жолда<br>SyncProof-тан жылдам | 120 000 жолды<br>салыстыруға | деректер бойынша<br>келісімшарт жобасына | тест, CI<br>Linux пен Windows-та |
+
+[Не істейді](#не-істейді) · [Жаңалықтар](#осы-нұсқадағы-жаңалықтар-02) · [Жылдамдық](#жылдамдық) · [Жылдам бастау](#жылдам-бастау) · [Келісімшарт](#маппинг-келісімшарты) · [CI](#конвейерде) · [Нұсқалар](#нұсқалар)
 
 </div>
 
 ## Не істейді
 
 Сіз клиенттерді, тапсырыстарды немесе жеткізушілерді бір жүйеден екіншісіне көшірдіңіз. Екі жақта да 120 000 жол. driftcheck бұлар мәндері бірдей сол 120 000 жазба ма, соны айтады және өзгеше әрбір жазбаны тізіп шығады.
+
+<details>
+<summary>Сол шығыс мәтін түрінде</summary>
 
 ```text
 $ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json --csv findings.csv
@@ -41,6 +53,8 @@ quality 91.4  rejected
   - 1200 target-only records exceeds allowed maximum 0
   - quality score 91.4 is below required 99.0
 ```
+
+</details>
 
 | Нәтиже | Мағынасы |
 |---|---|
@@ -73,6 +87,9 @@ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.js
   --patch fix.sql --table crm.customers --markdown summary.md
 ```
 
+<details>
+<summary><code>driftcheck init</code> не шығарады</summary>
+
 ```text
 driftcheck init  legacy.csv -> migrated.csv
 
@@ -86,6 +103,11 @@ driftcheck init  legacy.csv -> migrated.csv
   renamed records are searched by: full_name, email
 ```
 
+</details>
+
+<details>
+<summary>Түзету жоспары қалай көрінеді</summary>
+
 ```sql
 BEGIN;
 UPDATE "crm"."customers" SET "tier" = 'Business' WHERE "id" = 'C-100005';
@@ -96,6 +118,11 @@ INSERT INTO "crm"."customers" ("id", "name", "email_address", "tier", "monthly_r
 COMMIT;
 -- 6500 updates, 2500 inserts, 1200 deletes to review, 300 skipped
 ```
+
+</details>
+
+> [!IMPORTANT]
+> `DELETE` командалары түсініктемеге алынып жазылады. Тек жаңа жүйеде бар жол көшіруден кейін енгізілген жаңа деректер болуы мүмкін, сондықтан оны жоюды адам шешеді.
 
 ## Жылдамдық
 

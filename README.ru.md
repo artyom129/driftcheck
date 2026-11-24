@@ -6,16 +6,28 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
+[![CI](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/artyom129/driftcheck/actions/workflows/ci.yml)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.2.0-2F6FEB)
 ![Tests](https://img.shields.io/badge/tests-40%20passed-2E8B57)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+<img src="docs/check.svg" width="820" alt="driftcheck check на 120 000 строк: 107 000 совпали, 4 000 переименованы, 6 500 изменены, 2 800 пропали, 1 200 лишние, отклонено">
+
+| **159×** | **2,5 с** | **1,7 с** | **40** |
+|:---:|:---:|:---:|:---:|
+| быстрее SyncProof<br>на 120 000 строк | на сверку<br>120 000 строк | на черновик контракта<br>по данным | тестов, CI на<br>Linux и Windows |
+
+[Что делает](#что-делает) · [Что нового](#что-нового-в-этой-версии-02) · [Скорость](#скорость) · [Быстрый старт](#быстрый-старт) · [Контракт](#контракт-маппинга) · [CI](#в-конвейере) · [Версии](#версии)
 
 </div>
 
 ## Что делает
 
 Вы перенесли клиентов, заказы или поставщиков из одной системы в другую. С обеих сторон по 120 000 строк. driftcheck скажет, те же ли это 120 000 записей с теми же значениями, и перечислит каждую, которая отличается.
+
+<details>
+<summary>Тот же вывод текстом</summary>
 
 ```text
 $ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json --csv findings.csv
@@ -41,6 +53,8 @@ quality 91.4  rejected
   - 1200 target-only records exceeds allowed maximum 0
   - quality score 91.4 is below required 99.0
 ```
+
+</details>
 
 | Исход | Что значит |
 |---|---|
@@ -73,6 +87,9 @@ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.js
   --patch fix.sql --table crm.customers --markdown summary.md
 ```
 
+<details>
+<summary>Что печатает <code>driftcheck init</code></summary>
+
 ```text
 driftcheck init  legacy.csv -> migrated.csv
 
@@ -86,6 +103,11 @@ driftcheck init  legacy.csv -> migrated.csv
   renamed records are searched by: full_name, email
 ```
 
+</details>
+
+<details>
+<summary>Как выглядит план исправлений</summary>
+
 ```sql
 BEGIN;
 UPDATE "crm"."customers" SET "tier" = 'Business' WHERE "id" = 'C-100005';
@@ -96,6 +118,11 @@ INSERT INTO "crm"."customers" ("id", "name", "email_address", "tier", "monthly_r
 COMMIT;
 -- 6500 updates, 2500 inserts, 1200 deletes to review, 300 skipped
 ```
+
+</details>
+
+> [!IMPORTANT]
+> Команды `DELETE` пишутся закомментированными. Строка, которая есть только в новой системе, может оказаться новыми данными, внесёнными после миграции, поэтому удалять её решает человек.
 
 ## Скорость
 
