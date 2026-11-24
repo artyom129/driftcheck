@@ -32,7 +32,7 @@ You moved customers, orders or vendors from one system to another. Both sides ha
 ```text
 $ driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json --csv findings.csv
 driftcheck  legacy.csv -> migrated.csv
-120300 source rows, 118700 target rows, loaded in 185 ms, reconciled in 2007 ms
+120300 source rows, 118700 target rows, loaded in 598 ms, reconciled in 2366 ms
 
   matched            107000
   fuzzy_matched        4000
