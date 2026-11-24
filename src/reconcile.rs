@@ -76,6 +76,17 @@ pub struct Acceptance {
     pub reasons: Vec<String>,
 }
 
+/// How many matched records disagree on one mapped field.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FieldChange {
+    pub source_field: String,
+    pub target_field: String,
+    pub rule: &'static str,
+    pub changed: usize,
+    /// Share of the compared records (matched, renamed or changed) that differ here.
+    pub percent: f64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Summary {
     pub source_rows: usize,
@@ -83,6 +94,8 @@ pub struct Summary {
     pub results: usize,
     pub counts: BTreeMap<&'static str, usize>,
     pub changed_fields: usize,
+    /// Every mapped field that differs at least once, the worst first.
+    pub field_changes: Vec<FieldChange>,
     pub duplicate_target_keys: Vec<String>,
     pub duplicate_source_keys: Vec<String>,
     pub quality_score: f64,
@@ -315,6 +328,36 @@ pub fn reconcile(source: &Dataset, target: &Dataset, config: &Config) -> Result<
         changed_fields += r.diffs.len();
     }
     let get = |s: Status| counts.get(s.as_str()).copied().unwrap_or(0);
+
+    let mut per_field = vec![0usize; config.mappings.len()];
+    let field_index: HashMap<(&str, &str), usize> = config
+        .mappings
+        .iter()
+        .enumerate()
+        .map(|(i, m)| ((m.source.as_str(), m.target.as_str()), i))
+        .collect();
+    for d in records.iter().flat_map(|r| &r.diffs) {
+        if let Some(&i) = field_index.get(&(d.source_field.as_str(), d.target_field.as_str())) {
+            per_field[i] += 1;
+        }
+    }
+    let compared = (get(Status::Matched) + get(Status::FuzzyMatched) + get(Status::Changed)).max(1) as f64;
+    let mut field_changes: Vec<FieldChange> = config
+        .mappings
+        .iter()
+        .zip(&per_field)
+        .filter(|(_, &n)| n > 0)
+        .map(|(m, &n)| FieldChange {
+            source_field: m.source.clone(),
+            target_field: m.target.clone(),
+            rule: m.rule.as_str(),
+            changed: n,
+            percent: round_to(n as f64 / compared * 100.0, 2),
+        })
+        .collect();
+    // Stable sort: equal counts keep the contract's order.
+    field_changes.sort_by(|a, b| b.changed.cmp(&a.changed));
+
     let total = records.len().max(1) as f64;
     let clean = (get(Status::Matched) + get(Status::FuzzyMatched)) as f64;
     let quality_score = round_to(clean / total * 100.0, 1);
@@ -351,6 +394,7 @@ pub fn reconcile(source: &Dataset, target: &Dataset, config: &Config) -> Result<
             results: records.len(),
             counts,
             changed_fields,
+            field_changes,
             duplicate_target_keys: dup_t,
             duplicate_source_keys: dup_s,
             quality_score,
@@ -405,6 +449,11 @@ mod tests {
         assert!(!o.summary.acceptance.passed);
         let changed = o.records.iter().find(|r| r.status == Status::Changed).unwrap();
         assert_eq!(changed.diffs[0].source_field, "mrr");
+        // One of three compared records differs on mrr; name never differs.
+        assert_eq!(o.summary.field_changes.len(), 1);
+        assert_eq!(o.summary.field_changes[0].source_field, "mrr");
+        assert_eq!(o.summary.field_changes[0].changed, 1);
+        assert_eq!(o.summary.field_changes[0].percent, 33.33);
     }
 
     #[test]

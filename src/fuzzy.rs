@@ -43,6 +43,11 @@ impl Pattern {
         self.chars.is_empty()
     }
 
+    /// The characters the pattern was built from.
+    pub fn as_chars(&self) -> &[char] {
+        &self.chars
+    }
+
     #[inline]
     fn mask(&self, c: char) -> u64 {
         if (c as u32) < 128 {

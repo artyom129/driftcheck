@@ -7,7 +7,8 @@
 [English](README.md) · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-26%20passed-2E8B57)
+![Version](https://img.shields.io/badge/version-0.2.0-2F6FEB)
+![Tests](https://img.shields.io/badge/tests-40%20passed-2E8B57)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
@@ -29,6 +30,9 @@ driftcheck  legacy.csv -> migrated.csv
   ambiguous               0
 
   changed fields       6500
+    plan -> tier                          3000    2.55%
+    mrr -> monthly_revenue                2000     1.7%
+    start_date -> activated_at            1500    1.28%
   repeated source keys: 300
 
 quality 91.4  rejected
@@ -48,6 +52,50 @@ quality 91.4  rejected
 | `ambiguous` | Two candidates scored too close to call, left for a person |
 
 Formatting is not a difference. Upper-case emails, padded names, `1.290,00` against `1290`, and `02.03.2026` against `2026-03-02` all agree.
+
+## What's new in 0.2
+
+Version 0.1 answered one question: can this migration be accepted? Version 0.2 also covers what happens before and after the check. You no longer have to write the contract by hand, the report shows which column has the problem, and you get the SQL that fixes the target.
+
+| What | How it works now |
+|---|---|
+| `driftcheck init` | Drafts the mapping contract from the two files. Columns are paired by their content, so `full_name` finds `name` and `mrr` finds `monthly_revenue` even though the names differ. The key, the rule for each pair and the fields used to find renamed records are chosen the same way. On 120,000 rows the draft takes 1.7 s and gives the same verdict as a contract written by hand |
+| Per-field breakdown | The summary and the JSON report list every column that differs, worst first, with a count and a share: `plan -> tier  3000  2.55%`. You see straight away that the plan mapping is the problem, not 6,500 unrelated errors |
+| SQL patch plan | `--patch fix.sql --table crm.customers` writes one transaction: an `UPDATE` of only the differing fields for every changed record, an `INSERT` for every missing one, and a commented-out `DELETE` for every extra one, so a person decides what gets removed. Keys repeated in the source are skipped and reported. Quotes in values and identifiers are escaped |
+| Markdown report | `--markdown "$GITHUB_STEP_SUMMARY"` adds the verdict, the counts, the per-field table and the first 25 findings to the GitHub Actions job page. The file is appended to, so several checks can share one summary |
+| Any delimiter | Files exported with `;`, tabs or `\|` load without options. The delimiter is read from the header line, and `--delimiter` sets it explicitly |
+
+Reconciliation speed is the same as in 0.1: 120,000 rows in about 2.5 s on the same laptop.
+
+```bash
+driftcheck init  --source legacy.csv --target migrated.csv              # writes mapping.json
+driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json \
+  --patch fix.sql --table crm.customers --markdown summary.md
+```
+
+```text
+driftcheck init  legacy.csv -> migrated.csv
+
+  key  customer_id -> id
+       full_name              -> name                   text               values 100.0%
+       email                  -> email_address          email              values  99.0%
+       plan                   -> tier                   text               values 100.0%
+       mrr                    -> monthly_revenue        numeric_tolerance  values 100.0%
+       start_date             -> activated_at           date               values 100.0%
+       country                -> country_code           text               values 100.0%
+  renamed records are searched by: full_name, email
+```
+
+```sql
+BEGIN;
+UPDATE "crm"."customers" SET "tier" = 'Business' WHERE "id" = 'C-100005';
+UPDATE "crm"."customers" SET "monthly_revenue" = '299.00' WHERE "id" = 'C-100090';
+INSERT INTO "crm"."customers" ("id", "name", "email_address", "tier", "monthly_revenue", "activated_at", "country_code")
+  VALUES ('C-100127', 'Mason Tanaka', '9x6oyh3cvdo3@example.com', 'Business', '299.00', '2025-04-19', 'ES');
+-- DELETE FROM "crm"."customers" WHERE "id" = 'C-901149';
+COMMIT;
+-- 6500 updates, 2500 inserts, 1200 deletes to review, 300 skipped
+```
 
 ## Speed
 
@@ -75,13 +123,17 @@ python bench/syncproof_bench.py ../syncproof bench/data/120000   # needs a SyncP
 
 ```mermaid
 flowchart LR
-    A["legacy.csv"] --> L["Load in parallel"]
+    A["legacy.csv"] --> L["Load in parallel, delimiter detected"]
     B["migrated.csv"] --> L
+    I["driftcheck init"] -.-> C["mapping.json"]
+    C --> K
     L --> K["Pass 1: exact keys"]
     K --> F["Pass 2: renamed records, every core"]
     F --> D["Field rules and tolerances"]
     D --> G["Acceptance limits"]
-    G --> V["Verdict, JSON, CSV, exit code"]
+    G --> V["Verdict and exit code"]
+    G --> R["JSON, CSV, Markdown"]
+    G --> P["SQL patch plan"]
 ```
 
 Exact keys are claimed first, so a fuzzy guess can never take a row that belongs to another key, and the result does not depend on row order.
@@ -91,18 +143,24 @@ Exact keys are claimed first, so a fuzzy guess can never take a row that belongs
 ```bash
 cargo install --path .
 driftcheck gen --rows 1200 --out demo           # a migration with known damage
+driftcheck init --source demo/legacy.csv --target demo/migrated.csv --out demo/drafted.json
 driftcheck check --source demo/legacy.csv --target demo/migrated.csv \
-  --contract demo/mapping.json --json report.json --csv findings.csv
+  --contract demo/drafted.json --json report.json --csv findings.csv --patch fix.sql
 echo $?                                         # 0 accepted, 1 rejected, 2 error
 ```
 
-| Option | Purpose |
+| Option of `check` | Purpose |
 |---|---|
-| `--json report.json` | Summary as JSON. Add `--records` for every record |
+| `--json report.json` | Summary as JSON, with the per-field breakdown. Add `--records` for every record |
 | `--csv findings.csv` | One row per difference and per unmatched record, safe to open in Excel |
 | `--all` | Also list clean key matches in the CSV |
+| `--markdown summary.md` | Append a Markdown summary, for example to `$GITHUB_STEP_SUMMARY` |
+| `--patch fix.sql` | Write the SQL patch plan. `--table schema.table` names the target table |
+| `--delimiter semicolon` | Set the delimiter instead of detecting it: a character or `comma`, `semicolon`, `tab`, `pipe` |
 | `--threads N` | Limit the worker threads |
 | `--quiet` | Print nothing, rely on the exit code and the reports |
+
+`init` writes `mapping.json` by default, will not overwrite an existing file without `--force`, and prints every pair with the share of values the two columns have in common. Columns it could not pair are listed, so nothing is dropped silently.
 
 ## The mapping contract
 
@@ -142,8 +200,12 @@ The exit code makes it a gate: a migration job that leaves damage behind fails t
 
 ```yaml
 - name: Migration acceptance
-  run: driftcheck check --source export/legacy.csv --target export/new.csv --contract mapping.json --csv findings.csv
+  run: >
+    driftcheck check --source export/legacy.csv --target export/new.csv --contract mapping.json
+    --csv findings.csv --patch fix.sql --markdown "$GITHUB_STEP_SUMMARY"
 ```
+
+The verdict and the per-field table then appear on the job page, and the patch plan can be kept as a build artifact for review.
 
 ## Tests
 
@@ -151,23 +213,32 @@ The exit code makes it a gate: a migration job that leaves damage behind fails t
 cargo test --release
 ```
 
-26 tests. The main one runs SyncProof's own 1,200-customer test set and requires the same counts, the same quality score of 91.4 and the same four rejection reasons, word for word. Another generates 20,000 rows and requires every planted defect to be found. CI runs on Linux and Windows.
+40 tests. The main one runs SyncProof's own 1,200-customer test set and requires the same counts, the same quality score of 91.4 and the same four rejection reasons, word for word. Another generates 20,000 rows and requires every planted defect to be found. The `init` tests require the drafted contract to pair all seven columns on 1,200 and 30,000 shuffled rows and to find every planted defect when used for a check. The patch plan tests cover quoting and values with line breaks. CI runs on Linux and Windows, drafts a contract, checks with it and writes the summary to the job page.
 
 ## Project layout
 
 ```text
 src/
   config.rs     the mapping contract
-  data.rs       CSV loading
+  data.rs       CSV loading and delimiter detection
   value.rs      comparison rules: text, numbers, dates
   fuzzy.rs      bit-parallel similarity for renamed records
-  reconcile.rs  the two passes, outcomes and the verdict
-  report.rs     terminal summary, JSON and CSV
+  reconcile.rs  the two passes, outcomes, per-field breakdown and the verdict
+  infer.rs      driftcheck init: a contract drafted from the data
+  patch.rs      SQL patch plan
+  report.rs     terminal summary, JSON, CSV and Markdown
   gen.rs        test migrations of any size with known defects
   main.rs       command line
 tests/compat.rs SyncProof's test set and a 20,000-row run
 bench/          the SyncProof timing script
 ```
+
+## Versions
+
+| Version | What it brought |
+|---|---|
+| **0.2.0** | `driftcheck init` drafts the contract from the data. Per-field breakdown in the terminal and JSON. SQL patch plan with `--patch`. Markdown summary with `--markdown`. Delimiter detection and `--delimiter`. 40 tests |
+| 0.1.0 | Record-by-record reconciliation compatible with SyncProof contracts: two passes, six outcomes, acceptance limits, JSON and CSV reports, exit codes, the test-data generator. 159 times faster than SyncProof on 120,000 rows. 26 tests |
 
 ---
 

@@ -1,6 +1,6 @@
 [package]
 name = "driftcheck"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Fast record-by-record reconciliation of two data exports, with a verdict, a diff report and a CI exit code"
 license = "MIT"

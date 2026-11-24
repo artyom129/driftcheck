@@ -7,7 +7,8 @@
 [English](README.md) · [Русский](README.ru.md) · [Қазақша](README.kk.md)
 
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-26%20passed-2E8B57)
+![Version](https://img.shields.io/badge/version-0.2.0-2F6FEB)
+![Tests](https://img.shields.io/badge/tests-40%20passed-2E8B57)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 </div>
@@ -29,6 +30,9 @@ driftcheck  legacy.csv -> migrated.csv
   ambiguous               0
 
   changed fields       6500
+    plan -> tier                          3000    2.55%
+    mrr -> monthly_revenue                2000     1.7%
+    start_date -> activated_at            1500    1.28%
   repeated source keys: 300
 
 quality 91.4  rejected
@@ -48,6 +52,50 @@ quality 91.4  rejected
 | `ambiguous` | Два кандидата набрали почти одинаково, решать человеку |
 
 Форматирование различием не считается. Email в верхнем регистре, пробелы вокруг имени, `1.290,00` против `1290` и `02.03.2026` против `2026-03-02` совпадают.
+
+## Что нового в этой версии (0.2)
+
+Версия 0.1 отвечала на один вопрос: можно ли принять миграцию. Версия 0.2 закрывает и то, что происходит до проверки и после неё. Контракт больше не нужно писать руками, отчёт показывает, в какой колонке проблема, а на выходе есть SQL, который приводит цель в порядок.
+
+| Что | Как теперь работает |
+|---|---|
+| `driftcheck init` | Составляет контракт маппинга по двум файлам. Колонки сопоставляются по содержимому, поэтому `full_name` находит `name`, а `mrr` находит `monthly_revenue`, хотя названия разные. Так же выбираются ключ, правило для каждой пары и поля для поиска переименованных записей. На 120 000 строк черновик готов за 1,7 с и даёт тот же вердикт, что контракт, написанный вручную |
+| Разбивка по полям | Сводка и JSON-отчёт перечисляют каждую расходящуюся колонку, худшую первой, с числом и долей: `plan -> tier  3000  2.55%`. Сразу видно, что сломан маппинг тарифа, а не 6 500 разных ошибок |
+| SQL-план исправлений | `--patch fix.sql --table crm.customers` пишет одну транзакцию: `UPDATE` только расходящихся полей для каждой изменённой записи, `INSERT` для каждой пропавшей и закомментированный `DELETE` для каждой лишней, чтобы удаление решал человек. Ключи, повторённые в источнике, пропускаются с пометкой. Кавычки в значениях и именах экранируются |
+| Отчёт в Markdown | `--markdown "$GITHUB_STEP_SUMMARY"` выводит вердикт, счётчики, таблицу по полям и первые 25 находок на страницу задачи GitHub Actions. Файл дописывается, поэтому несколько проверок делят одну сводку |
+| Любой разделитель | Файлы с `;`, табуляцией или `\|` загружаются без параметров. Разделитель берётся из строки заголовков, а `--delimiter` задаёт его явно |
+
+Скорость сверки та же, что в 0.1: 120 000 строк примерно за 2,5 с на том же ноутбуке.
+
+```bash
+driftcheck init  --source legacy.csv --target migrated.csv              # пишет mapping.json
+driftcheck check --source legacy.csv --target migrated.csv --contract mapping.json \
+  --patch fix.sql --table crm.customers --markdown summary.md
+```
+
+```text
+driftcheck init  legacy.csv -> migrated.csv
+
+  key  customer_id -> id
+       full_name              -> name                   text               values 100.0%
+       email                  -> email_address          email              values  99.0%
+       plan                   -> tier                   text               values 100.0%
+       mrr                    -> monthly_revenue        numeric_tolerance  values 100.0%
+       start_date             -> activated_at           date               values 100.0%
+       country                -> country_code           text               values 100.0%
+  renamed records are searched by: full_name, email
+```
+
+```sql
+BEGIN;
+UPDATE "crm"."customers" SET "tier" = 'Business' WHERE "id" = 'C-100005';
+UPDATE "crm"."customers" SET "monthly_revenue" = '299.00' WHERE "id" = 'C-100090';
+INSERT INTO "crm"."customers" ("id", "name", "email_address", "tier", "monthly_revenue", "activated_at", "country_code")
+  VALUES ('C-100127', 'Mason Tanaka', '9x6oyh3cvdo3@example.com', 'Business', '299.00', '2025-04-19', 'ES');
+-- DELETE FROM "crm"."customers" WHERE "id" = 'C-901149';
+COMMIT;
+-- 6500 updates, 2500 inserts, 1200 deletes to review, 300 skipped
+```
 
 ## Скорость
 
@@ -75,13 +123,17 @@ python bench/syncproof_bench.py ../syncproof bench/data/120000   # нужен к
 
 ```mermaid
 flowchart LR
-    A["legacy.csv"] --> L["Параллельная загрузка"]
+    A["legacy.csv"] --> L["Параллельная загрузка, разделитель определяется сам"]
     B["migrated.csv"] --> L
+    I["driftcheck init"] -.-> C["mapping.json"]
+    C --> K
     L --> K["Проход 1: точные ключи"]
     K --> F["Проход 2: переименованные записи, все ядра"]
     F --> D["Правила полей и допуски"]
     D --> G["Пределы приёмки"]
-    G --> V["Вердикт, JSON, CSV, код выхода"]
+    G --> V["Вердикт и код выхода"]
+    G --> R["JSON, CSV, Markdown"]
+    G --> P["SQL-план исправлений"]
 ```
 
 Сначала занимаются точные ключи, поэтому нечёткая догадка не может отнять строку у другого ключа, а результат не зависит от порядка строк.
@@ -91,18 +143,24 @@ flowchart LR
 ```bash
 cargo install --path .
 driftcheck gen --rows 1200 --out demo           # миграция с известными повреждениями
+driftcheck init --source demo/legacy.csv --target demo/migrated.csv --out demo/drafted.json
 driftcheck check --source demo/legacy.csv --target demo/migrated.csv \
-  --contract demo/mapping.json --json report.json --csv findings.csv
+  --contract demo/drafted.json --json report.json --csv findings.csv --patch fix.sql
 echo $?                                         # 0 принято, 1 отклонено, 2 ошибка
 ```
 
-| Параметр | Назначение |
+| Параметр `check` | Назначение |
 |---|---|
-| `--json report.json` | Сводка в JSON. С `--records` туда попадает каждая запись |
+| `--json report.json` | Сводка в JSON с разбивкой по полям. С `--records` туда попадает каждая запись |
 | `--csv findings.csv` | Строка на каждое различие и каждую запись без пары, файл безопасно открывать в Excel |
 | `--all` | Включить в CSV и чистые совпадения по ключу |
+| `--markdown summary.md` | Дописать сводку в Markdown, например в `$GITHUB_STEP_SUMMARY` |
+| `--patch fix.sql` | Записать SQL-план исправлений. `--table schema.table` задаёт таблицу цели |
+| `--delimiter semicolon` | Задать разделитель вместо автоопределения: символ или `comma`, `semicolon`, `tab`, `pipe` |
 | `--threads N` | Ограничить число потоков |
 | `--quiet` | Ничего не печатать, смотреть на код выхода и отчёты |
+
+`init` по умолчанию пишет `mapping.json`, не перезаписывает существующий файл без `--force` и печатает каждую пару с долей общих значений. Колонки без пары перечисляются, так что ничего не теряется молча.
 
 ## Контракт маппинга
 
@@ -142,8 +200,12 @@ echo $?                                         # 0 принято, 1 откло
 
 ```yaml
 - name: Migration acceptance
-  run: driftcheck check --source export/legacy.csv --target export/new.csv --contract mapping.json --csv findings.csv
+  run: >
+    driftcheck check --source export/legacy.csv --target export/new.csv --contract mapping.json
+    --csv findings.csv --patch fix.sql --markdown "$GITHUB_STEP_SUMMARY"
 ```
+
+Вердикт и таблица по полям появляются на странице задачи, а план исправлений можно сохранить артефактом сборки для проверки.
 
 ## Тесты
 
@@ -151,23 +213,32 @@ echo $?                                         # 0 принято, 1 откло
 cargo test --release
 ```
 
-26 тестов. Главный прогоняет собственный тестовый набор SyncProof на 1 200 клиентов и требует тех же чисел, той же оценки качества 91.4 и тех же четырёх причин отказа слово в слово. Другой генерирует 20 000 строк и требует найти каждое заложенное повреждение. CI запускается на Linux и Windows.
+40 тестов. Главный прогоняет собственный тестовый набор SyncProof на 1 200 клиентов и требует тех же чисел, той же оценки качества 91.4 и тех же четырёх причин отказа слово в слово. Другой генерирует 20 000 строк и требует найти каждое заложенное повреждение. Тесты `init` требуют, чтобы черновик контракта сопоставил все семь колонок на 1 200 и на 30 000 перемешанных строк и чтобы проверка с ним нашла каждое заложенное повреждение. Тесты SQL-плана проверяют экранирование и значения с переводом строки. CI запускается на Linux и Windows, составляет контракт, проверяет по нему и пишет сводку на страницу задачи.
 
 ## Структура проекта
 
 ```text
 src/
   config.rs     контракт маппинга
-  data.rs       загрузка CSV
+  data.rs       загрузка CSV и определение разделителя
   value.rs      правила сравнения: текст, числа, даты
   fuzzy.rs      битово-параллельная похожесть для переименованных записей
-  reconcile.rs  два прохода, исходы и вердикт
-  report.rs     сводка в терминале, JSON и CSV
+  reconcile.rs  два прохода, исходы, разбивка по полям и вердикт
+  infer.rs      driftcheck init: контракт по данным
+  patch.rs      SQL-план исправлений
+  report.rs     сводка в терминале, JSON, CSV и Markdown
   gen.rs        тестовые миграции любого размера с известными повреждениями
   main.rs       командная строка
 tests/compat.rs тестовый набор SyncProof и прогон на 20 000 строк
 bench/          скрипт замера SyncProof
 ```
+
+## Версии
+
+| Версия | Что принесла |
+|---|---|
+| **0.2.0** | `driftcheck init` составляет контракт по данным. Разбивка по полям в терминале и JSON. SQL-план исправлений через `--patch`. Сводка в Markdown через `--markdown`. Определение разделителя и `--delimiter`. 40 тестов |
+| 0.1.0 | Сверка запись за записью, совместимая с контрактами SyncProof: два прохода, шесть исходов, пределы приёмки, отчёты JSON и CSV, коды выхода, генератор тестовых данных. В 159 раз быстрее SyncProof на 120 000 строк. 26 тестов |
 
 ---
 

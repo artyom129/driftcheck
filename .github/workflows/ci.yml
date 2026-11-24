@@ -31,3 +31,15 @@ jobs:
           test "$code" -eq 1
           test -s gen/report.json
           test -s gen/findings.csv
+      - name: Draft a contract and check with it
+        shell: bash
+        run: |
+          cargo run --release -- init --source gen/legacy.csv --target gen/migrated.csv --out gen/drafted.json
+          set +e
+          cargo run --release -- check --source gen/legacy.csv --target gen/migrated.csv --contract gen/drafted.json \
+            --patch gen/fix.sql --table crm.customers --markdown "$GITHUB_STEP_SUMMARY" --quiet
+          code=$?
+          set -e
+          test "$code" -eq 1
+          grep -q '^UPDATE "crm"."customers"' gen/fix.sql
+          grep -q '^COMMIT;' gen/fix.sql
